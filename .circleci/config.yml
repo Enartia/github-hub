@@ -1,0 +1,65 @@
+version: 2.1
+executors:
+  docker-publisher:
+    environment:
+      IMAGE_NAME: papaki/github-hub
+      HUB_VERSION: 2.14.2
+    docker:
+      - image: circleci/buildpack-deps:stretch
+jobs:
+  build:
+    executor: docker-publisher
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Build Docker image
+          command: docker build -t $IMAGE_NAME:latest . --build-arg HUB_VERSION=$HUB_VERSION
+      - run:
+          name: Run Docker image
+          command: docker run -ti $IMAGE_NAME:latest hub version
+      - run:
+          name: Archive Docker image
+          command: docker save -o image.tar $IMAGE_NAME
+      - persist_to_workspace:
+          root: .
+          paths:
+            - ./image.tar
+  publish-latest:
+    executor: docker-publisher
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Load archived Docker image
+          command: docker load -i /tmp/workspace/image.tar
+      - run:
+          name: Tag and publish Docker image to Docker Hub
+          command: |
+            git tag $HUB_VERSION -f
+            git push -q https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Enartia/github-hub.git $HUB_VERSION -f
+            echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
+            docker tag $IMAGE_NAME:latest $IMAGE_NAME:$HUB_VERSION
+            docker push $IMAGE_NAME:latest
+            docker push $IMAGE_NAME:$HUB_VERSION
+workflows:
+  build-PR:
+    jobs:
+      - build
+  publish-master:
+    jobs:
+      - build #:
+          #filters:
+           # branches:
+           #   only: master
+      - publish-latest:
+          context:
+            - docker-hub
+            - enartia-global
+          requires:
+            - build
+         # filters:
+         #   branches:
+         #     only: master
