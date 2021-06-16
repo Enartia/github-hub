@@ -1,0 +1,62 @@
+version: 2.1
+
+orbs:
+  docker: circleci/docker@1.6.0
+
+executors:
+  docker-publisher:
+    docker:
+      - image: circleci/buildpack-deps:stretch
+jobs:
+  build:
+    executor: docker-publisher
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Build Docker image
+          command: make build
+      - run:
+          name: Test Docker image
+          command: make test
+      - run:
+          name: Archive Docker image
+          command: make save
+      - persist_to_workspace:
+          root: .
+          paths:
+            - ./image.tar
+  publish-latest:
+    executor: docker-publisher
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Load archived Docker image
+          command: make load IMAGE_PATH=/tmp/workspace/
+      - docker/install-docker-credential-helper
+      - docker/configure-docker-credentials-store
+      - run:
+          name: Tag and publish Docker image to Docker Hub
+          command: make publish
+workflows:
+  build-changes:
+    jobs:
+      - build
+  publish-main:
+    jobs:
+      - build:
+          filters:
+            branches:
+              only: main
+      - publish-latest:
+          context:
+            - docker-hub
+            - enartia-global
+          requires:
+            - build
+          filters:
+            branches:
+              only: main
